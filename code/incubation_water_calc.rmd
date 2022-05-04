@@ -1,0 +1,123 @@
+---
+title: "Calculate water for incubation"
+author: "Jacob Weverka"
+date: "8/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+
+```{r}
+whc = read_csv(here("data/moisture_whc/csv/whc.csv"),
+               col_types = cols(date = col_date(format = "%m/%d/%Y"))
+)
+
+
+fm = read_csv(here("data/moisture_whc/csv/moisture.csv"),
+               col_types = cols(date = col_date(format = "%m/%d/%Y"))
+)
+
+inc = read_csv(here("data/incubation/csv/weights.csv"),
+               col_types = cols(date = col_date(format = "%m/%d/%Y"))
+)
+```
+
+
+
+```{r}
+
+whc = whc %>%
+  mutate(wet_soil = tray_wet_soil - tray_weight,
+         dry_soil = tray_dry_soil - tray_weight,
+         moisture = wet_soil - dry_soil,
+         water_capacity = moisture/dry_soil)
+```
+
+```{r}
+fm = fm %>%
+  mutate(wet_soil = tray_wet_soil - tray_weight,
+         dry_soil = tray_dry_soil - tray_weight,
+         moisture = wet_soil - dry_soil,
+         field_moisture = moisture/dry_soil)
+```
+
+
+Join moisture data to incubation weights chart
+
+```{r}
+inc_water = inc %>%
+  left_join(fm, by = c("sample")) %>%
+  rename(date = date.x) %>%
+  select(date, sample, tube_ID, soil_weight, field_moisture) %>%
+  left_join(whc, by = c("sample")) %>% 
+  rename(date = date.x) %>%
+  select(date, sample, tube_ID, soil_weight, field_moisture, water_capacity)
+  
+```
+
+Calculate water to add
+
+```{r}
+
+inc_water = inc_water %>%
+  mutate(water_start = field_moisture * soil_weight,
+         water_target = water_capacity * soil_weight * 0.4,
+         water_add = water_target - water_start,
+         water_actual = round(water_add*2000)/2000,
+         total_mass = soil_weight + water_actual)
+
+```
+
+
+```{r}
+write.csv(inc_water, file = "../data/incubation/add_water.csv")
+```
+
+```{r}
+capac = whc %>% select(plot, treatment, depth, water_capacity)
+
+tubes_soil = read_csv("../data/incubation/weights/csv/tube_weights.csv",
+                 col_types = cols(treatment = col_factor(),
+                                  depth = col_factor()))
+
+empty_tubes = read_csv("../data/incubation/weights/csv/empty_tube_weights.csv",
+                       col_types = cols(treatment = col_factor(),
+                                  depth = col_factor()))
+
+tubes = left_join(tubes_soil, empty_tubes, by = c("plot", "treatment", "depth", "tube_ID")) %>%
+  select(sample_date = sample_date.x,
+         extraction_date,
+         plot,
+         treatment,
+         depth,
+         tube_ID,
+         soil_tube_weight,
+         tube_weight)
+
+
+
+soiltubes = inner_join(tubes, inc_water, by = c("plot", "treatment", "depth", "tube_ID")) %>%
+  mutate(total = total_mass + tube_weight,
+         loss = total - soil_tube_weight)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+

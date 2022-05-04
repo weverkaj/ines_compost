@@ -1,0 +1,115 @@
+---
+title: "inorganic N"
+author: "Jacob Weverka"
+date: "5/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(here)
+library(broom)
+library(modelr)
+
+```
+
+Raw data
+```{r message=FALSE, results='hide', warning=FALSE}
+
+ammonium_raw = read_csv(here("data/inorganic_n/NH4_data_4_15_22.csv"), col_types = cols())
+
+nitrate_rawA = read_csv(here("data/inorganic_n/NO3_4_20_22.csv"), col_types = cols())
+nitrate_rawB = read_csv(here("data/inorganic_n/NO3_4_20_22B.csv"), col_types = cols())
+
+
+```
+
+
+Keys
+```{r}
+ammonium_key = read_csv(here("data/inorganic_n/plate_reader_id_04_15_22.csv"), col_types = cols(position = "character"))
+
+nitrate_key = read_csv(here("data/inorganic_n/plate_reader_id_04_20_22.csv"), col_types = cols())
+
+
+```
+
+
+
+```{r}
+ammonium_absorbance = ammonium_raw %>% 
+  column_to_rownames("<>") %>% 
+  as.matrix() %>% 
+  as.vector() %>% 
+  as.tibble() %>% 
+  rownames_to_column("position") %>% 
+  right_join(ammonium_key, by = "position") %>% 
+  nest(everything()) %>% 
+  mutate(standards = map(data, ~ .x %>% filter(std == 1)),
+         curve = map(standards, ~ lm(std_conc_NH4 ~ value, data = .x)),
+         model = map(curve, ~ glance(.x)),
+         samples = map2(data, curve, ~ .x %>% 
+                         filter(is.na(std)) %>% 
+                         filter(if_any(everything(), ~ !is.na(.))) %>% 
+                         add_predictions(.y))
+         )
+
+
+ammonium_data = ammonium_absorbance %>% 
+  select(samples) %>% 
+  unnest(cols = everything()) %>% 
+  select(plot, tube_ID, pred) %>% 
+  filter(if_any(everything(), ~ !is.na(.)))
+
+```
+
+
+
+```{r}
+nitrate_absorbanceA = nitrate_rawA %>% 
+  column_to_rownames("<>") %>% 
+  as.matrix() %>% 
+  as.vector() %>% 
+  as.tibble() %>% 
+  rownames_to_column("position") %>% 
+  mutate(position = as.numeric(position)) %>% 
+  filter(position <= 40) %>% 
+  left_join(nitrate_key, by = "position") %>% 
+  filter(value < 3) %>% 
+  nest(everything())
+
+nitrate_absorbanceB = nitrate_rawB %>% 
+column_to_rownames("<>") %>% 
+  as.matrix() %>% 
+  as.vector() %>% 
+  as.tibble() %>% 
+  rownames_to_column("position") %>% 
+  mutate(position = as.numeric(position)) %>% 
+  filter(position >= 49) %>% 
+  left_join(nitrate_key, by = "position") %>% 
+  nest(everything())
+
+nitrate_absorbance = nitrate_absorbanceA %>% 
+  bind_rows(nitrate_absorbanceB)  %>% 
+  mutate(standards = map(data, ~ .x %>% filter(std == 1)),
+         curve = map(standards, ~ lm(std_conc_NO3 ~ value, data = .x)),
+         model = map(curve, ~ glance(.x)),
+         samples = map2(data, curve, ~ .x %>% 
+                         filter(is.na(std)) %>% 
+                         filter(if_any(everything(), ~ !is.na(.))) %>% 
+                         add_predictions(.y) %>% 
+                         mutate(concentration = pred * dilution))
+         )
+
+nitrate_data = nitrate_absorbance %>% 
+  select(samples) %>% 
+  unnest(cols = everything()) %>% 
+  select(plot, tube_ID, value, concentration) %>% 
+  filter(!is.na(concentration))
+
+
+```
+
